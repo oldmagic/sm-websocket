@@ -1324,6 +1324,8 @@ void Debug(int iDebugLevel, const char[] fmt, any ...) {
 	char sBuffer[512];
 	VFormat(sBuffer, sizeof(sBuffer), fmt, 3);
 	LogToFile(g_sLog, sBuffer);
+#else
+	#pragma unused iDebugLevel, fmt
 #endif
 }
 
