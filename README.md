@@ -1002,6 +1002,53 @@ Contributions are welcome! Please:
 
 ---
 
+## ⚠️ Current Limitations & Future Plans
+
+### Server-Only Mode
+
+**Important:** This plugin currently operates in **server mode only**. It creates a WebSocket server that accepts incoming connections from WebSocket clients (browsers, Node.js, Python, etc.).
+
+#### What This Means
+
+✅ **Supported Use Cases:**
+- Web browser connects to game server for live stats
+- External monitoring tools connect to game server
+- Admin panels connect to game server for control
+- Multiple clients connecting to same game server
+
+❌ **Not Yet Supported:**
+- Game server connecting **OUT** to external WebSocket servers
+- Socket.IO client connections from game server
+- Connecting to Discord, Slack, or other WebSocket APIs
+- Client-to-client direct connections
+
+### Integration with Magnetized MatchFlow
+
+If you're using this with `magnetized_matchflow.sp`, note that:
+
+- **magnetized_matchflow.sp** needs **WebSocket client** mode (connect out to Socket.IO server)
+- **sm-websocket** provides **WebSocket server** mode (accept incoming connections)
+
+These are fundamentally different architectural roles. See [INTEGRATION_NOTES.md](INTEGRATION_NOTES.md) for detailed explanation and migration path.
+
+#### Workaround Options
+
+1. **Continue using raw socket extension** - magnetized_matchflow.sp works with raw TCP sockets
+2. **Reverse the architecture** - Have backend connect TO the game server instead
+3. **Wait for client mode** - Future enhancement to support outgoing WebSocket connections
+
+### Planned Enhancements
+
+Future versions may include:
+
+- 🔄 **WebSocket Client Mode** - Connect to external WebSocket servers
+- 🔌 **Socket.IO Protocol Layer** - Full Socket.IO client/server support
+- 📦 **Connection Pooling** - Manage multiple WebSocket connections efficiently
+- 🔐 **Authentication Extensions** - Built-in token-based auth support
+- 📊 **Performance Monitoring** - Connection stats and metrics
+
+---
+
 ## 📄 License
 
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
