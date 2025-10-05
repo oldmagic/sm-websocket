@@ -68,6 +68,21 @@ ArrayList g_hChildReceiveForwards;
 ArrayList g_hChildDisconnectForwards;
 ArrayList g_hChildReadyStateChangeForwards;
 
+// Client socket data structures (for outgoing connections)
+ArrayList g_hClientSockets;
+ArrayList g_hClientSocketIndexes;
+ArrayList g_hClientSocketPlugins;
+ArrayList g_hClientSocketHost;
+ArrayList g_hClientSocketPort;
+ArrayList g_hClientSocketPath;
+ArrayList g_hClientSocketReadyState;
+ArrayList g_hClientSocketFragmentedPayload;
+ArrayList g_hClientConnectForwards;
+ArrayList g_hClientReceiveForwards;
+ArrayList g_hClientDisconnectForwards;
+ArrayList g_hClientErrorForwards;
+ArrayList g_hClientIsClient; // Marks sockets as client connections
+
 // Handle counter for pseudo-handles
 int g_iLastSocketIndex = 0;
 
@@ -103,6 +118,7 @@ public Plugin myinfo = {
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
 	RegPluginLibrary("websocket");
 	CreateNative("Websocket_Open", Native_Websocket_Open);
+	CreateNative("Websocket_Connect", Native_Websocket_Connect);
 	CreateNative("Websocket_HookChild", Native_Websocket_HookChild);
 	CreateNative("Websocket_HookReadyStateChange", Native_Websocket_HookReadyStateChange);
 	CreateNative("Websocket_GetReadyState", Native_Websocket_GetReadyState);
@@ -159,13 +175,33 @@ public void OnPluginStart() {
 	g_hChildDisconnectForwards = new ArrayList();
 	g_hChildReadyStateChangeForwards = new ArrayList();
 	
+	// Initialize client socket arrays
+	g_hClientSockets = new ArrayList();
+	g_hClientSocketIndexes = new ArrayList();
+	g_hClientSocketPlugins = new ArrayList();
+	g_hClientSocketHost = new ArrayList(ByteCountToCells(256));
+	g_hClientSocketPort = new ArrayList();
+	g_hClientSocketPath = new ArrayList(ByteCountToCells(256));
+	g_hClientSocketReadyState = new ArrayList();
+	g_hClientSocketFragmentedPayload = new ArrayList();
+	g_hClientConnectForwards = new ArrayList();
+	g_hClientReceiveForwards = new ArrayList();
+	g_hClientDisconnectForwards = new ArrayList();
+	g_hClientErrorForwards = new ArrayList();
+	g_hClientIsClient = new ArrayList();
+	
 #if DEBUG > 0
 	BuildPath(Path_SM, g_sLog, sizeof(g_sLog), "logs/websocket_debug.log");
 #endif
 }
 
 public void OnPluginEnd() {
-	// Clean up all connections
+	// Clean up all client connections
+	while (g_hClientSockets.Length > 0) {
+		CloseClientSocket(0);
+	}
+	
+	// Clean up all server connections
 	while (g_hMasterSockets.Length > 0) {
 		CloseMasterSocket(0);
 	}
@@ -195,6 +231,19 @@ public void OnPluginEnd() {
 	delete g_hChildReceiveForwards;
 	delete g_hChildDisconnectForwards;
 	delete g_hChildReadyStateChangeForwards;
+	delete g_hClientSockets;
+	delete g_hClientSocketIndexes;
+	delete g_hClientSocketPlugins;
+	delete g_hClientSocketHost;
+	delete g_hClientSocketPort;
+	delete g_hClientSocketPath;
+	delete g_hClientSocketReadyState;
+	delete g_hClientSocketFragmentedPayload;
+	delete g_hClientConnectForwards;
+	delete g_hClientReceiveForwards;
+	delete g_hClientDisconnectForwards;
+	delete g_hClientErrorForwards;
+	delete g_hClientIsClient;
 }
 
 public int Native_Websocket_Open(Handle plugin, int numParams) {

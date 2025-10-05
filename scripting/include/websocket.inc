@@ -128,6 +128,14 @@ typedef WebsocketReadyStateChangedCB = function void(
 );
 
 /**
+ * Called when a client WebSocket connection is successfully established
+ *
+ * @param websocket     The websocket handle for the client connection
+ * @noreturn
+ */
+typedef WebsocketConnectCB = function void(WebsocketHandle websocket);
+
+/**
  * Creates a websocket server that listens on the specified IP and port
  *
  * @note Multiple plugins can share the same IP:port combination
@@ -147,6 +155,31 @@ native WebsocketHandle Websocket_Open(
 	WebsocketIncomingCB inc, 
 	WebsocketErrorCB we, 
 	WebsocketCloseCB clo
+);
+
+/**
+ * Connects to a remote WebSocket server as a client
+ *
+ * @note Use ws:// for plain connections, wss:// for TLS (requires socket extension with TLS)
+ * @note Always call Websocket_Close() when done to clean up
+ * @note The path parameter is used in the HTTP Upgrade request (e.g., "/socket.io")
+ *
+ * @param url           The WebSocket URL (e.g., "ws://example.com:8080" or "wss://example.com:443")
+ * @param path          The HTTP path for the connection (e.g., "/" or "/socket.io")
+ * @param onConnect     Callback when connection is established
+ * @param onReceive     Callback for received data
+ * @param onDisconnect  Callback when disconnected
+ * @param onError       Callback for errors
+ * @return              A WebsocketHandle on success, INVALID_WEBSOCKET_HANDLE on failure
+ * @error               Throws error if URL parsing fails or socket creation fails
+ */
+native WebsocketHandle Websocket_Connect(
+	const char[] url,
+	const char[] path,
+	WebsocketConnectCB onConnect,
+	WebsocketReceiveCB onReceive,
+	WebsocketDisconnectCB onDisconnect,
+	WebsocketErrorCB onError
 );
 
 /**
@@ -189,8 +222,9 @@ native bool Websocket_HookReadyStateChange(
  *
  * @note For binary data containing null bytes, always specify dataSize
  * @note The socket must be in State_Open to send data
+ * @note For client connections, frames are automatically masked per RFC 6455
  *
- * @param childwebsocket    The child websocket to send data through
+ * @param childwebsocket    The child or client websocket to send data through
  * @param type              The data type (SendType_Text or SendType_Binary)
  * @param sPayload          The data to send
  * @param dataSize          Length of data to send (-1 to auto-detect using strlen)
@@ -227,13 +261,14 @@ native WebsocketReadyState Websocket_GetReadyState(WebsocketHandle childwebsocke
 native void Websocket_UnhookChild(WebsocketHandle childwebsocket);
 
 /**
- * Closes a listening master socket
+ * Closes a listening master socket or client connection
  *
- * @note The socket will remain open if other plugins are still using it
+ * @note For master sockets: remains open if other plugins are still using it
+ * @note For client connections: closes the connection with code 1000 (normal closure)
  * @note Always call this in OnPluginEnd() to properly clean up resources
  * @note All associated child sockets will be closed with code 1001
  *
- * @param websocket         The master websocket to close
+ * @param websocket         The master or client websocket to close
  * @noreturn
  * @error                   Throws error if websocket is invalid
  */
@@ -258,6 +293,7 @@ public SharedPlugin __pl_websocket = {
 #if !defined REQUIRE_PLUGIN
 public void __pl_websocket_SetNTVOptional() {
 	MarkNativeAsOptional("Websocket_Open");
+	MarkNativeAsOptional("Websocket_Connect");
 	MarkNativeAsOptional("Websocket_HookReadyStateChange");
 	MarkNativeAsOptional("Websocket_HookChild");
 	MarkNativeAsOptional("Websocket_Send");
