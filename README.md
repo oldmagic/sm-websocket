@@ -17,6 +17,7 @@ A server-side WebSocket protocol implementation that enables real-time bidirecti
 - [Quick Start](#-quick-start)
 - [API Reference](#-api-reference)
 - [Usage Examples](#-usage-examples)
+- [CS:GO Server Integration](#-csgo-server-integration)
 - [Architecture](#-architecture)
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
@@ -432,7 +433,494 @@ void BroadcastToWebClients(const char[] json)
 
 ---
 
-## 🏗️ Architecture
+## � CS:GO Server Integration
+
+This section provides a complete guide for integrating WebSocket functionality into your CS:GO dedicated server.
+
+### Directory Structure
+
+```
+csgo/
+├── addons/
+│   └── sourcemod/
+│       ├── extensions/
+│       │   └── socket.ext.so          # Socket extension (Linux)
+│       │   └── socket.ext.dll         # Socket extension (Windows)
+│       ├── plugins/
+│       │   ├── websocket.smx          # WebSocket plugin (compiled)
+│       │   └── your_plugin.smx        # Your plugin using WebSocket
+│       ├── scripting/
+│       │   ├── include/
+│       │   │   ├── websocket.inc      # WebSocket API include
+│       │   │   ├── base64.inc         # Base64 encoding
+│       │   │   └── sha1.inc           # SHA-1 hashing
+│       │   └── your_plugin.sp         # Your plugin source
+│       ├── configs/
+│       │   └── websocket.cfg          # WebSocket configuration (optional)
+│       └── logs/
+│           └── websocket_debug.log    # Debug log (if DEBUG enabled)
+└── cfg/
+    └── server.cfg                     # Server configuration
+```
+
+### Installation Steps
+
+#### 1. Install Socket Extension
+
+Download the Socket extension from [sm-ext-socket](https://github.com/oldmagic/sm-ext-socket):
+
+**Linux:**
+```bash
+cd csgo/addons/sourcemod/extensions/
+wget https://github.com/oldmagic/sm-ext-socket/releases/latest/download/socket.ext.so
+chmod +x socket.ext.so
+```
+
+**Windows:**
+Download `socket.ext.dll` and place it in `csgo/addons/sourcemod/extensions/`
+
+#### 2. Install WebSocket Plugin
+
+```bash
+# Copy compiled plugin
+cp compiled/websocket.smx csgo/addons/sourcemod/plugins/
+
+# Copy include files (for development)
+cp scripting/include/*.inc csgo/addons/sourcemod/scripting/include/
+```
+
+#### 3. Configure Convars
+
+Create `csgo/addons/sourcemod/configs/websocket.cfg`:
+
+```sourcepawn
+// ===================================================================
+// WebSocket Configuration
+// ===================================================================
+
+// WebSocket plugin version (read-only)
+// Default: "2.0"
+sm_websocket_version "2.0"
+
+// ===================================================================
+// Network Configuration (Set these in your plugin code, not here)
+// ===================================================================
+// WebSocket server port: 8550 (example)
+// WebSocket bind address: "0.0.0.0" or "127.0.0.1"
+// Note: These are set programmatically when calling Websocket_Open()
+```
+
+#### 4. Server Configuration
+
+Add to `csgo/cfg/server.cfg`:
+
+```sourcepawn
+// ===================================================================
+// SourceMod & Extensions
+// ===================================================================
+
+// Load SourceMod
+sm plugins load_unlock
+sm plugins load websocket
+
+// ===================================================================
+// Firewall & Network
+// ===================================================================
+
+// Open ports in firewall (example):
+// - Game server: 27015 (TCP/UDP)
+// - WebSocket: 8550 (TCP)
+
+// Note: Configure your firewall to allow incoming connections:
+// Linux (ufw): sudo ufw allow 8550/tcp
+// Linux (iptables): iptables -A INPUT -p tcp --dport 8550 -j ACCEPT
+// Windows: Add inbound rule for TCP port 8550
+```
+
+### Example Plugin for CS:GO
+
+Create `csgo/addons/sourcemod/scripting/csgo_websocket_stats.sp`:
+
+```sourcepawn
+#pragma semicolon 1
+#pragma newdecls required
+
+#include <sourcemod>
+#include <websocket>
+#include <cstrike>
+
+#define PLUGIN_VERSION "1.0"
+
+// WebSocket handle
+WebsocketHandle g_hWebSocket = INVALID_WEBSOCKET_HANDLE;
+
+// Configuration
+#define WS_HOST "0.0.0.0"  // Listen on all interfaces
+#define WS_PORT 8550        // WebSocket port
+
+public Plugin myinfo = {
+    name = "CS:GO WebSocket Stats",
+    author = "Your Name",
+    description = "Broadcasts CS:GO game stats via WebSocket",
+    version = PLUGIN_VERSION,
+    url = "https://yourwebsite.com"
+};
+
+public void OnPluginStart() {
+    // Open WebSocket server
+    g_hWebSocket = Websocket_Open(
+        WS_HOST,
+        WS_PORT,
+        OnWebSocketIncoming,
+        OnWebSocketError,
+        OnWebSocketClose
+    );
+    
+    if (g_hWebSocket == INVALID_WEBSOCKET_HANDLE) {
+        SetFailState("Failed to create WebSocket on %s:%d", WS_HOST, WS_PORT);
+    }
+    
+    PrintToServer("[WebSocket] Server listening on %s:%d", WS_HOST, WS_PORT);
+    
+    // Hook CS:GO events
+    HookEvent("player_death", Event_PlayerDeath);
+    HookEvent("round_start", Event_RoundStart);
+    HookEvent("round_end", Event_RoundEnd);
+}
+
+public void OnPluginEnd() {
+    if (g_hWebSocket != INVALID_WEBSOCKET_HANDLE) {
+        Websocket_Close(g_hWebSocket);
+    }
+}
+
+// ===================================================================
+// WebSocket Callbacks
+// ===================================================================
+
+public Action OnWebSocketIncoming(
+    WebsocketHandle websocket,
+    WebsocketHandle child,
+    const char[] remoteIP,
+    int remotePort,
+    char[] protocols,
+    const char[] path
+) {
+    PrintToServer("[WebSocket] Incoming connection from %s:%d (path: %s)", 
+        remoteIP, remotePort, path);
+    
+    // Hook the child connection
+    Websocket_HookChild(child, OnWebSocketReceive, OnWebSocketDisconnect, OnWebSocketChildError);
+    Websocket_HookReadyStateChange(child, OnWebSocketReadyStateChange);
+    
+    // Send welcome message
+    char welcomeMsg[256];
+    FormatEx(welcomeMsg, sizeof(welcomeMsg), 
+        "{\"type\":\"welcome\",\"server\":\"CS:GO Stats\",\"map\":\"%s\"}",
+        GetCurrentMap());
+    
+    return Plugin_Continue;
+}
+
+public void OnWebSocketReceive(
+    WebsocketHandle websocket,
+    WebsocketSendType iType,
+    const char[] receiveData,
+    int dataSize
+) {
+    PrintToServer("[WebSocket] Received: %s", receiveData);
+    
+    // Parse JSON commands (example)
+    if (StrContains(receiveData, "\"cmd\":\"get_players\"") != -1) {
+        SendPlayerList(websocket);
+    }
+    else if (StrContains(receiveData, "\"cmd\":\"get_scores\"") != -1) {
+        SendScores(websocket);
+    }
+}
+
+public void OnWebSocketDisconnect(WebsocketHandle websocket) {
+    PrintToServer("[WebSocket] Client disconnected");
+}
+
+public void OnWebSocketChildError(WebsocketHandle websocket, int errorType, int errorNum) {
+    LogError("[WebSocket] Child error: type=%d, num=%d", errorType, errorNum);
+}
+
+public void OnWebSocketError(WebsocketHandle websocket, int errorType, int errorNum, int data) {
+    LogError("[WebSocket] Master error: type=%d, num=%d", errorType, errorNum);
+}
+
+public void OnWebSocketClose(WebsocketHandle websocket) {
+    PrintToServer("[WebSocket] Master socket closed");
+}
+
+public void OnWebSocketReadyStateChange(WebsocketHandle websocket, WebsocketReadyState newState) {
+    PrintToServer("[WebSocket] Ready state changed to: %d", newState);
+}
+
+// ===================================================================
+// CS:GO Event Handlers
+// ===================================================================
+
+public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
+    int victim = GetClientOfUserId(event.GetInt("userid"));
+    int attacker = GetClientOfUserId(event.GetInt("attacker"));
+    
+    char weapon[32];
+    event.GetString("weapon", weapon, sizeof(weapon));
+    
+    bool headshot = event.GetBool("headshot");
+    
+    // Broadcast to all WebSocket clients
+    BroadcastEvent("player_death", victim, attacker, weapon, headshot);
+}
+
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
+    BroadcastSimpleEvent("round_start");
+}
+
+public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
+    int winner = event.GetInt("winner");
+    BroadcastRoundEnd(winner);
+}
+
+// ===================================================================
+// Helper Functions
+// ===================================================================
+
+void BroadcastEvent(const char[] eventType, int victim, int attacker, const char[] weapon, bool headshot) {
+    char victimName[64], attackerName[64];
+    
+    if (IsValidClient(victim)) {
+        GetClientName(victim, victimName, sizeof(victimName));
+    } else {
+        strcopy(victimName, sizeof(victimName), "Unknown");
+    }
+    
+    if (IsValidClient(attacker)) {
+        GetClientName(attacker, attackerName, sizeof(attackerName));
+    } else {
+        strcopy(attackerName, sizeof(attackerName), "World");
+    }
+    
+    char json[512];
+    FormatEx(json, sizeof(json),
+        "{\"type\":\"%s\",\"victim\":\"%s\",\"attacker\":\"%s\",\"weapon\":\"%s\",\"headshot\":%s,\"timestamp\":%d}",
+        eventType, victimName, attackerName, weapon, headshot ? "true" : "false", GetTime());
+    
+    BroadcastToAll(json);
+}
+
+void BroadcastSimpleEvent(const char[] eventType) {
+    char json[256];
+    FormatEx(json, sizeof(json), 
+        "{\"type\":\"%s\",\"timestamp\":%d}", eventType, GetTime());
+    BroadcastToAll(json);
+}
+
+void BroadcastRoundEnd(int winner) {
+    char json[256];
+    FormatEx(json, sizeof(json),
+        "{\"type\":\"round_end\",\"winner\":%d,\"timestamp\":%d}", winner, GetTime());
+    BroadcastToAll(json);
+}
+
+void SendPlayerList(WebsocketHandle websocket) {
+    char json[2048], playerData[128];
+    strcopy(json, sizeof(json), "{\"type\":\"players\",\"list\":[");
+    
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsValidClient(i)) {
+            char name[64];
+            GetClientName(i, name, sizeof(name));
+            
+            FormatEx(playerData, sizeof(playerData),
+                "{\"id\":%d,\"name\":\"%s\",\"team\":%d,\"score\":%d,\"deaths\":%d}",
+                i, name, GetClientTeam(i), GetClientFrags(i), GetClientDeaths(i));
+            
+            StrCat(json, sizeof(json), playerData);
+            if (i < MaxClients) StrCat(json, sizeof(json), ",");
+        }
+    }
+    
+    StrCat(json, sizeof(json), "]}");
+    Websocket_Send(websocket, SendType_Text, json);
+}
+
+void SendScores(WebsocketHandle websocket) {
+    int ctScore = GetTeamScore(CS_TEAM_CT);
+    int tScore = GetTeamScore(CS_TEAM_T);
+    
+    char json[256];
+    FormatEx(json, sizeof(json),
+        "{\"type\":\"scores\",\"ct\":%d,\"t\":%d,\"map\":\"%s\"}",
+        ctScore, tScore, GetCurrentMap());
+    
+    Websocket_Send(websocket, SendType_Text, json);
+}
+
+void BroadcastToAll(const char[] message) {
+    // Note: You'd need to track all connected WebSocket children
+    // and iterate through them to send to all clients
+    // This is simplified for example purposes
+    PrintToServer("[Broadcast] %s", message);
+}
+
+bool IsValidClient(int client) {
+    return (client > 0 && client <= MaxClients && IsClientConnected(client) && IsClientInGame(client));
+}
+
+char[] GetCurrentMap() {
+    char map[64];
+    GetCurrentMap(map, sizeof(map));
+    return map;
+}
+```
+
+### Compiling the Plugin
+
+```bash
+cd csgo/addons/sourcemod/scripting/
+./spcomp64 -i include csgo_websocket_stats.sp -o ../plugins/csgo_websocket_stats.smx
+```
+
+### Testing the Connection
+
+#### Using Browser Console
+
+```javascript
+// Connect to WebSocket server
+const ws = new WebSocket('ws://your-server-ip:8550');
+
+ws.onopen = () => {
+    console.log('Connected to CS:GO server');
+    
+    // Request player list
+    ws.send(JSON.stringify({ cmd: 'get_players' }));
+};
+
+ws.onmessage = (event) => {
+    console.log('Received:', JSON.parse(event.data));
+};
+
+ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+    console.log('Disconnected');
+};
+```
+
+#### Using Python
+
+```python
+import asyncio
+import websockets
+import json
+
+async def connect():
+    uri = "ws://your-server-ip:8550"
+    async with websockets.connect(uri) as websocket:
+        print("Connected to CS:GO server")
+        
+        # Request scores
+        await websocket.send(json.dumps({"cmd": "get_scores"}))
+        
+        # Listen for events
+        while True:
+            message = await websocket.recv()
+            data = json.loads(message)
+            print(f"Event: {data['type']}")
+
+asyncio.run(connect())
+```
+
+### Common Convars Reference
+
+These convars are available in your plugin code:
+
+```sourcepawn
+// Example convar usage in your plugin
+ConVar g_cvWebSocketEnabled;
+ConVar g_cvWebSocketPort;
+ConVar g_cvWebSocketHost;
+ConVar g_cvBroadcastKills;
+ConVar g_cvBroadcastRounds;
+
+public void OnPluginStart() {
+    // Create custom convars
+    g_cvWebSocketEnabled = CreateConVar("sm_ws_enabled", "1", 
+        "Enable WebSocket server", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+    
+    g_cvWebSocketPort = CreateConVar("sm_ws_port", "8550", 
+        "WebSocket server port", FCVAR_NOTIFY, true, 1024.0, true, 65535.0);
+    
+    g_cvWebSocketHost = CreateConVar("sm_ws_host", "0.0.0.0", 
+        "WebSocket bind address (0.0.0.0 = all interfaces)");
+    
+    g_cvBroadcastKills = CreateConVar("sm_ws_broadcast_kills", "1", 
+        "Broadcast player deaths via WebSocket", FCVAR_NOTIFY);
+    
+    g_cvBroadcastRounds = CreateConVar("sm_ws_broadcast_rounds", "1", 
+        "Broadcast round events via WebSocket", FCVAR_NOTIFY);
+    
+    // Auto-generate config file
+    AutoExecConfig(true, "websocket_stats");
+}
+```
+
+This generates `csgo/cfg/sourcemod/websocket_stats.cfg`:
+
+```
+// This file was auto-generated by SourceMod (v1.11.0)
+// ConVars for plugin "csgo_websocket_stats.smx"
+
+// Enable WebSocket server
+// Default: "1"
+// Minimum: "0.000000"
+// Maximum: "1.000000"
+sm_ws_enabled "1"
+
+// WebSocket server port
+// Default: "8550"
+// Minimum: "1024.000000"
+// Maximum: "65535.000000"
+sm_ws_port "8550"
+
+// WebSocket bind address (0.0.0.0 = all interfaces)
+// Default: "0.0.0.0"
+sm_ws_host "0.0.0.0"
+
+// Broadcast player deaths via WebSocket
+// Default: "1"
+sm_ws_broadcast_kills "1"
+
+// Broadcast round events via WebSocket
+// Default: "1"
+sm_ws_broadcast_rounds "1"
+```
+
+### Security Considerations
+
+1. **Firewall Configuration**: Only open WebSocket ports to trusted networks
+2. **Authentication**: Implement token-based authentication in your plugin
+3. **Rate Limiting**: Limit message frequency to prevent spam
+4. **Input Validation**: Always validate incoming JSON data
+5. **TLS/SSL**: Consider using a reverse proxy (nginx) for wss:// connections
+
+### Performance Tips
+
+- Use `SendType_Binary` for large data transfers
+- Implement message batching for high-frequency events
+- Monitor `websocket_debug.log` for connection issues
+- Keep payload sizes under 32KB for optimal performance
+- Use JSON minification (no whitespace) for smaller messages
+
+---
+
+## �🏗️ Architecture
 
 ### Protocol Flow
 
