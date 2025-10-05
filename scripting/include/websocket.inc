@@ -3,173 +3,260 @@
 #endif
 #define _websocket_included
 
+/**
+ * WebSocket Ready State enumeration (RFC 6455)
+ * Represents the current state of a WebSocket connection
+ */
 enum WebsocketReadyState {
-	State_Connecting = 0,
-	State_Open,
-	State_Closing,
-	State_Closed // Kinda unused
+	State_Connecting = 0,  // Connection is being established
+	State_Open = 1,        // Connection is open and ready for communication
+	State_Closing = 2,     // Connection is closing (closing handshake started)
+	State_Closed = 3       // Connection is closed or couldn't be opened
 }
 
+/**
+ * WebSocket handle type
+ * Used to reference WebSocket connections (both master and child)
+ */
 enum WebsocketHandle {
 	INVALID_WEBSOCKET_HANDLE = 0
 }
 
+/**
+ * WebSocket send data type
+ * Specifies the type of data being sent over the WebSocket
+ */
 enum WebsocketSendType {
-	SendType_Text = 0,
-	SendType_Binary
+	SendType_Text = 0,    // UTF-8 encoded text data
+	SendType_Binary = 1   // Raw binary data
 }
 
 /**
- * called if an unrecoverable error occured on the master socket
+ * Called when an unrecoverable error occurs on the master socket
  *
- * @param WebsocketHandle	websocket	The websocket handle pointing to the calling websocket
- * @param cell_t			errorType	The error type, see defines in socket.inc
- * @param cell_t			errorNum	The errno, see errno.h for details
+ * @param websocket     The websocket handle pointing to the calling websocket
+ * @param errorType     The error type (see socket.inc for error types)
+ * @param errorNum      The errno value (see errno.h for details)
  * @noreturn
  */
-typedef WebsocketErrorCB = function void(WebsocketHandle websocket, const int errorType, const int errorNum);
+typedef WebsocketErrorCB = function void(
+	WebsocketHandle websocket, 
+	int errorType, 
+	int errorNum
+);
 
 /**
- * called if a master websocket is closed
+ * Called when a master websocket is closed
  *
- * @param WebsocketHandle	websocket	The websocket handle pointing to the calling websocket
+ * @param websocket     The websocket handle pointing to the calling websocket
  * @noreturn
  */
 typedef WebsocketCloseCB = function void(WebsocketHandle websocket);
 
 /**
- * triggered when a client connected to our websocket
+ * Triggered when a client connects to the websocket server
  *
- * @param Handle	websocket		The websocket handle pointing to the calling listen-socket
- * @param Handle	newWebsocket	The websocket handle to the newly spawned child socket
- * @param String	remoteIP		The remote IP
- * @param cell_t	remotePort	The remote port
- * @param String	protocols 	The subprotocols the client supports seperated by commas. You have to choose one of the list, so "protocols" is only that one protocol.
- * @param String	getPath 		The GET path transmitted upon connection by the client.
- * @return
+ * @param websocket     The websocket handle pointing to the listen socket
+ * @param newWebsocket  The websocket handle to the newly created child socket
+ * @param remoteIP      The remote IP address of the client
+ * @param remotePort    The remote port of the client
+ * @param protocols     Buffer containing client's supported subprotocols (comma-separated)
+ *                      Modify this to select one protocol to use
+ * @param getPath       The HTTP GET path sent by the client during handshake
+ * @return              Plugin_Continue to accept connection, Plugin_Handled to reject
  */
 typeset WebsocketIncomingCB {
-	function Action(WebsocketHandle websocket, WebsocketHandle newWebsocket, const char[] remoteIP, int remotePort, char protocols[256]);
-	function Action(WebsocketHandle websocket, WebsocketHandle newWebsocket, const char[] remoteIP, int remotePort, char protocols[256], char getPath[2000]);
-};
+	function Action(
+		WebsocketHandle websocket, 
+		WebsocketHandle newWebsocket, 
+		const char[] remoteIP, 
+		int remotePort, 
+		char protocols[256]
+	);
+	
+	function Action(
+		WebsocketHandle websocket, 
+		WebsocketHandle newWebsocket, 
+		const char[] remoteIP, 
+		int remotePort, 
+		char protocols[256], 
+		const char[] getPath
+	);
+}
 
 /**
- * triggered if a websocket receives data
+ * Triggered when a websocket receives data
  *
- * @note This is binary safe if you always use dataSize for operations on receiveData[]
- * @note packets may be split up into multiple chunks -> multiple calls to the receive callback
- * @note if not set otherwise by SocketSetOption(..., ConcatenateCallbacks, ...) receiveData will
- *       never be longer than 4096 characters including \0 terminator
+ * @note This callback is binary-safe when using dataSize for operations
+ * @note Packets may be split into multiple chunks (multiple callback calls)
+ * @note Unless configured otherwise with SocketSetOption, receiveData will
+ *       not exceed 4096 characters including null terminator
  *
- * @param Handle	websocket		The socket handle pointing to the calling socket
- * @param String	receiveData	The data which arrived, 0-terminated at receiveData[dataSize]
- * @param cell_t	dataSize	The length of the arrived data excluding the 0-termination
+ * @param websocket     The websocket handle pointing to the calling socket
+ * @param iType         The type of data received (Text or Binary)
+ * @param receiveData   The received data (null-terminated at receiveData[dataSize])
+ * @param dataSize      The length of received data (excluding null terminator)
  * @noreturn
  */
-typedef WebsocketReceiveCB = function void(WebsocketHandle websocket, WebsocketSendType iType, const char[] receiveData, const int dataSize);
+typedef WebsocketReceiveCB = function void(
+	WebsocketHandle websocket, 
+	WebsocketSendType iType, 
+	const char[] receiveData, 
+	int dataSize
+);
 
 /**
- * called if a socket has been properly disconnected by the remote side
+ * Called when a socket has been properly disconnected by the remote side
  *
- * @param Handle	websocket		The socket handle pointing to the calling socket
+ * @param websocket     The websocket handle pointing to the calling socket
  * @noreturn
  */
 typedef WebsocketDisconnectCB = function void(WebsocketHandle websocket);
 
 /**
- * called if the readystate of a childsocket changes.
- * Only fires for ReadyState_Open and ReadyState_Closing.
+ * Called when the ready state of a child socket changes
  *
- * @param Handle	websocket		The socket handle pointing to the calling socket
- * @param WebsocketReadyState	readystate	The new readystate of the childsocket.
+ * @note Only fires for State_Open and State_Closing transitions
+ *
+ * @param websocket     The websocket handle pointing to the calling socket
+ * @param readystate    The new ready state of the child socket
  * @noreturn
  */
-typedef WebsocketReadyStateChangedCB = function void(WebsocketHandle websocket, WebsocketReadyState readystate);
+typedef WebsocketReadyStateChangedCB = function void(
+	WebsocketHandle websocket, 
+	WebsocketReadyState readystate
+);
 
 /**
- * Creates a websocket server which listens on the supplied ip:port combination.
+ * Creates a websocket server that listens on the specified IP and port
  *
- * @param sHostName    	The IP to bind to.
- * @param iPort    		The port to listen on
- * @param inc    		The incoming child connection callback
- * @param we    		The error callback
- * @return        		A WebsocketHandle or INVALID_WEBSOCKET_HANDLE on error.
+ * @note Multiple plugins can share the same IP:port combination
+ * @note Always call Websocket_Close() in OnPluginEnd() to clean up
+ *
+ * @param sHostName     The IP address to bind to (e.g., "0.0.0.0" for all interfaces)
+ * @param iPort         The port to listen on
+ * @param inc           Callback for incoming client connections
+ * @param we            Callback for socket errors
+ * @param clo           Callback when the socket is closed
+ * @return              A WebsocketHandle on success, INVALID_WEBSOCKET_HANDLE on failure
+ * @error               Throws error if socket creation/binding fails
  */
-native WebsocketHandle Websocket_Open(const char[] sHostName, int iPort, WebsocketIncomingCB inc, WebsocketErrorCB we, WebsocketCloseCB clo);
+native WebsocketHandle Websocket_Open(
+	const char[] sHostName, 
+	int iPort, 
+	WebsocketIncomingCB inc, 
+	WebsocketErrorCB we, 
+	WebsocketCloseCB clo
+);
 
 /**
- * Hooks child socket's events
+ * Hooks events for a child socket (client connection)
  *
- * @param childwebsocket    The child websocket to hook.
- * @param recv    			Data receive callback
- * @param disc    			The disconnect callback
- * @param we    			The error callback
- * @return        			True if child socket was hooked, false otherwise
+ * @note Must be called in the WebsocketIncomingCB callback to handle the connection
+ * @note If no plugin hooks a child socket, it will be automatically closed
+ *
+ * @param childwebsocket    The child websocket to hook
+ * @param recv              Callback for received data
+ * @param disc              Callback for disconnection
+ * @param we                Callback for errors
+ * @return                  True on success, false otherwise
+ * @error                   Throws error if childwebsocket is invalid
  */
-native bool Websocket_HookChild(WebsocketHandle childwebsocket, WebsocketReceiveCB recv, WebsocketDisconnectCB disc, WebsocketErrorCB we);
+native bool Websocket_HookChild(
+	WebsocketHandle childwebsocket, 
+	WebsocketReceiveCB recv, 
+	WebsocketDisconnectCB disc, 
+	WebsocketErrorCB we
+);
 
 /**
- * Hooks child socket's readystate changes
+ * Hooks ready state change events for a child socket
  *
- * @param childwebsocket    The child websocket to hook.
- * @param readystate   			ReadyState change callback
- * @return        			True if child socket was hooked, false otherwise
+ * @note Optional - only needed if you want to track state transitions
+ *
+ * @param childwebsocket    The child websocket to hook
+ * @param readystate        Callback for ready state changes
+ * @return                  True on success, false otherwise
+ * @error                   Throws error if childwebsocket is invalid
  */
-native bool Websocket_HookReadyStateChange(WebsocketHandle childwebsocket, WebsocketReadyStateChangedCB readystate);
-
+native bool Websocket_HookReadyStateChange(
+	WebsocketHandle childwebsocket, 
+	WebsocketReadyStateChangedCB readystate
+);
 
 /**
  * Sends text or binary data through the websocket
  *
- * @param childwebsocket    The child websocket to send to
- * @param type    			The datatype SendType_Text or SendType_Binary
- * @param sPayLoad 			The data to send
- * @param dataSize			If set, it's used as maxlength. Useful for binary data where \0 might be used before the end of the data.
- * @return        			True if child socket was hooked, false otherwise
+ * @note For binary data containing null bytes, always specify dataSize
+ * @note The socket must be in State_Open to send data
+ *
+ * @param childwebsocket    The child websocket to send data through
+ * @param type              The data type (SendType_Text or SendType_Binary)
+ * @param sPayload          The data to send
+ * @param dataSize          Length of data to send (-1 to auto-detect using strlen)
+ *                          Use actual length for binary data with embedded nulls
+ * @return                  True if data was sent, false otherwise
+ * @error                   Throws error if childwebsocket is invalid
  */
-native bool Websocket_Send(WebsocketHandle childwebsocket, WebsocketSendType type, const char[] sPayload, const int dataSize =- 1);
+native bool Websocket_Send(
+	WebsocketHandle childwebsocket, 
+	WebsocketSendType type, 
+	const char[] sPayload, 
+	int dataSize = -1
+);
 
 /**
- * Gets a child websocket's readyState.
+ * Gets the current ready state of a child websocket
  *
- * @param childwebsocket    The child websocket
- * @return        			The readyState
+ * @param childwebsocket    The child websocket to query
+ * @return                  The current WebsocketReadyState
+ * @error                   Throws error if childwebsocket is invalid
  */
 native WebsocketReadyState Websocket_GetReadyState(WebsocketHandle childwebsocket);
 
 /**
- * Unhooks a child socket's events: If there's no plugin listening anymore, the socket is closed.
+ * Unhooks all events from a child socket
  *
- * @param childwebsocket    The child websocket
+ * @note If no plugins are listening to the socket after unhooking,
+ *       the socket will be automatically closed with close code 1000
+ *
+ * @param childwebsocket    The child websocket to unhook
  * @noreturn
+ * @error                   Throws error if childwebsocket is invalid
  */
 native void Websocket_UnhookChild(WebsocketHandle childwebsocket);
 
 /**
- * Closes a listening master socket, created with Websocket_Open.
- * Note: The socket will still be open, if there are more plugins using it.
- * 
- * Call this in OnPluginEnd()!
+ * Closes a listening master socket
  *
- * @param websocket    The master websocket
+ * @note The socket will remain open if other plugins are still using it
+ * @note Always call this in OnPluginEnd() to properly clean up resources
+ * @note All associated child sockets will be closed with code 1001
+ *
+ * @param websocket         The master websocket to close
  * @noreturn
+ * @error                   Throws error if websocket is invalid
  */
 native void Websocket_Close(WebsocketHandle websocket);
 
-public SharedPlugin __pl_websocket = 
-{
+/**
+ * Shared plugin interface
+ */
+public SharedPlugin __pl_websocket = {
 	name = "websocket",
 	file = "websocket.smx",
 #if defined REQUIRE_PLUGIN
-	required = 1,
+	required = 1
 #else
-	required = 0,
+	required = 0
 #endif
 };
 
+/**
+ * Mark natives as optional if plugin is not required
+ */
 #if !defined REQUIRE_PLUGIN
-public void __pl_websocket_SetNTVOptional()
-{
+public void __pl_websocket_SetNTVOptional() {
 	MarkNativeAsOptional("Websocket_Open");
 	MarkNativeAsOptional("Websocket_HookReadyStateChange");
 	MarkNativeAsOptional("Websocket_HookChild");
